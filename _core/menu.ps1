@@ -4,7 +4,7 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
         if ($me) {
             Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$me`"" -Verb RunAs -ErrorAction Stop
         } else {
-            $url = 'https://raw.githubusercontent.com/Heldaeus/explorer-sidebar-cleaner/master/_core/menu.ps1'
+            $url = 'https://raw.githubusercontent.com/Heldaeus/windows-explorer-tweaks/master/_core/menu.ps1'
             Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"irm '$url' | iex`"" -Verb RunAs -ErrorAction Stop
         }
     } catch {
