@@ -187,6 +187,11 @@ function Set-RecycleBin([bool]$pin) {
 $changed = $false
 $running = $true
 
+# Querying SoftwareLicensingProduct via CIM is slow (it wakes the Software Protection
+# Platform service), so we fetch it once upfront rather than on every menu redraw.
+# It will be refreshed when the user launches MAS and returns to the menu.
+$wa = Get-WindowsActivationState
+
 try {
 
 while ($running) {
@@ -199,7 +204,6 @@ while ($running) {
     $rs = Get-RecommendedSectionState
     $tt = Get-TabletTaskbarState
     $eg = Get-EdgeState
-    $wa = Get-WindowsActivationState
 
     Clear-Host
     Write-Host ""
@@ -258,7 +262,10 @@ while ($running) {
             # Launch Microsoft Activation Scripts (https://github.com/massgravel/Microsoft-Activation-Scripts)
             # in a new window. MAS is TUI-only and handles its own flow, so we open it
             # separately. Elevation is inherited from the already-elevated parent process.
-            Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"irm https://get.activated.win | iex`""
+            # -Wait blocks until the MAS window closes, so we re-query only after it's
+            # actually done — not immediately after launch when nothing has changed yet.
+            Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"irm https://get.activated.win | iex`"" -Wait
+            $wa = Get-WindowsActivationState
         }
         'Q' { $running = $false }
     }
