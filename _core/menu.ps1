@@ -80,6 +80,14 @@ function Get-RecycleBinState {
     if ($qa -and ($qa.Items() | Where-Object { $_.Name -eq 'Recycle Bin' })) { 'Pinned' } else { 'Unpinned' }
 }
 
+function Get-EdgeState {
+    # Edge (Chromium) installs to this path on both 32-bit and 64-bit Windows.
+    # Checking the executable is faster and more reliable than querying AppX packages,
+    # which can vary depending on how Edge was installed (Store vs. standalone installer).
+    $exe = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+    if (Test-Path $exe) { 'Installed' } else { 'Not installed' }
+}
+
 # ── Actions ───────────────────────────────────────────────────────────────────
 # Each function accepts a parameter describing the desired end-state and applies the
 # appropriate registry changes. The menu loop decides what to call; these just do it.
@@ -182,6 +190,7 @@ while ($running) {
     $rb = Get-RecycleBinState
     $rs = Get-RecommendedSectionState
     $tt = Get-TabletTaskbarState
+    $eg = Get-EdgeState
 
     Clear-Host
     Write-Host ""
@@ -194,6 +203,7 @@ while ($running) {
     Write-Host ("  [4]  Recycle Bin          " + $rb)
     Write-Host ("  [5]  Recommended Section  " + $rs)
     Write-Host ("  [6]  Tablet Taskbar       " + $tt)
+    Write-Host ("  [7]  Microsoft Edge       " + $eg)
     Write-Host ""
     Write-Host "  [Q]  Quit"
     Write-Host ""
@@ -226,6 +236,13 @@ while ($running) {
         '6' {
             if ($tt -eq 'Enabled') { Set-TabletTaskbar $false } else { Set-TabletTaskbar $true }
             $changed = $true
+        }
+        '7' {
+            # Launch EdgeRemover (https://github.com/he3als/EdgeRemover) in a new window.
+            # We're already elevated, so the child process inherits admin rights without
+            # needing an additional UAC prompt. EdgeRemover runs its own interactive TUI
+            # so we open it separately rather than trying to embed it in this menu.
+            Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"iex(irm 'https://cdn.jsdelivr.net/gh/he3als/EdgeRemover@main/get.ps1')`""
         }
         'Q' { $running = $false }
     }
