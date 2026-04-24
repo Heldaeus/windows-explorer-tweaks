@@ -88,6 +88,14 @@ function Get-EdgeState {
     if (Test-Path $exe) { 'Installed' } else { 'Not installed' }
 }
 
+function Get-WindowsActivationState {
+    # SoftwareLicensingProduct tracks every Microsoft license on the machine.
+    # We filter to Windows products that have a partial product key (i.e. are actually
+    # installed) and check LicenseStatus: 1 = Licensed/Activated, anything else = not.
+    $status = (Get-CimInstance SoftwareLicensingProduct -Filter "Name like 'Windows%' and PartialProductKey is not null" -ErrorAction SilentlyContinue).LicenseStatus
+    if ($status -eq 1) { 'Activated' } else { 'Not activated' }
+}
+
 # ── Actions ───────────────────────────────────────────────────────────────────
 # Each function accepts a parameter describing the desired end-state and applies the
 # appropriate registry changes. The menu loop decides what to call; these just do it.
@@ -191,6 +199,7 @@ while ($running) {
     $rs = Get-RecommendedSectionState
     $tt = Get-TabletTaskbarState
     $eg = Get-EdgeState
+    $wa = Get-WindowsActivationState
 
     Clear-Host
     Write-Host ""
@@ -204,6 +213,7 @@ while ($running) {
     Write-Host ("  [5]  Recommended Section  " + $rs)
     Write-Host ("  [6]  Tablet Taskbar       " + $tt)
     Write-Host ("  [7]  Microsoft Edge       " + $eg)
+    Write-Host ("  [8]  Windows Activation   " + $wa)
     Write-Host ""
     Write-Host "  [Q]  Quit"
     Write-Host ""
@@ -243,6 +253,12 @@ while ($running) {
             # needing an additional UAC prompt. EdgeRemover runs its own interactive TUI
             # so we open it separately rather than trying to embed it in this menu.
             Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"iex(irm 'https://cdn.jsdelivr.net/gh/he3als/EdgeRemover@main/get.ps1')`""
+        }
+        '8' {
+            # Launch Microsoft Activation Scripts (https://github.com/massgravel/Microsoft-Activation-Scripts)
+            # in a new window. MAS is TUI-only and handles its own flow, so we open it
+            # separately. Elevation is inherited from the already-elevated parent process.
+            Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"irm https://get.activated.win | iex`""
         }
         'Q' { $running = $false }
     }
