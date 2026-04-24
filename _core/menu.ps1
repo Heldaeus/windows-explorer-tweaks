@@ -1,7 +1,12 @@
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     $me = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
     try {
-        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$me`"" -Verb RunAs -ErrorAction Stop
+        if ($me) {
+            Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$me`"" -Verb RunAs -ErrorAction Stop
+        } else {
+            $url = 'https://raw.githubusercontent.com/Heldaeus/explorer-sidebar-cleaner/master/_core/menu.ps1'
+            Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"irm '$url' | iex`"" -Verb RunAs -ErrorAction Stop
+        }
     } catch {
         Write-Host "Elevation failed: $_" -ForegroundColor Red
         Read-Host 'Press Enter to close'

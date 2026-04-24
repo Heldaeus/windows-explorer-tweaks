@@ -4,7 +4,12 @@ A collection of PowerShell scripts for tweaking the Windows 11 Explorer UI, bund
 
 ## Usage
 
-Run `Explorer Sidebar Cleaner.bat` as administrator. Each option displays its current state and toggles on selection.
+**One-liner (run directly from PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/Heldaeus/explorer-sidebar-cleaner/master/_core/menu.ps1 | iex
+```
+
+Or run `Explorer Sidebar Cleaner.bat` if you have the repo cloned locally. Either way, a UAC prompt will appear automatically for the options that require administrator privileges. Each option displays its current state and toggles on selection.
 
 ## Options
 
