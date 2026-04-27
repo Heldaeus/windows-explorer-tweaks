@@ -88,6 +88,14 @@ function Get-EdgeState {
     if (Test-Path $exe) { 'Installed' } else { 'Not installed' }
 }
 
+function Get-UACPasswordState {
+    # ConsentPromptBehaviorAdmin controls what the UAC dialog asks for when an admin
+    # triggers elevation. 1 = requires the admin to type their password; 5 (default) =
+    # just a Yes/No consent dialog with no credential entry.
+    $val = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name ConsentPromptBehaviorAdmin -ErrorAction SilentlyContinue).ConsentPromptBehaviorAdmin
+    if ($val -eq 1) { 'Required' } else { 'Not required' }
+}
+
 function Get-WindowsActivationState {
     # SoftwareLicensingProduct tracks every Microsoft license on the machine.
     # We filter to Windows products that have a partial product key (i.e. are actually
@@ -152,6 +160,14 @@ function Set-TabletTaskbar([bool]$enable) {
     Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name ExpandableTaskbar -Value $val -Type DWord
 }
 
+function Set-UACPassword([bool]$require) {
+    # The system UAC policy key always exists on Windows; we never need to create it.
+    # 1 = prompt for credentials (password required on secure desktop).
+    # 5 = prompt for consent only (Windows default — just click Yes).
+    $val = if ($require) { 1 } else { 5 }
+    Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name ConsentPromptBehaviorAdmin -Value $val -Type DWord
+}
+
 function Set-RecycleBin([bool]$pin) {
     $shell   = New-Object -ComObject Shell.Application
     $hkcuKey = 'HKCU:\Software\Classes\CLSID\{645FF040-5081-101B-9F08-00AA002F954E}'
@@ -204,6 +220,7 @@ while ($running) {
     $rs = Get-RecommendedSectionState
     $tt = Get-TabletTaskbarState
     $eg = Get-EdgeState
+    $up = Get-UACPasswordState
 
     Clear-Host
     Write-Host ""
@@ -218,6 +235,7 @@ while ($running) {
     Write-Host ("  [6]  Tablet Taskbar       " + $tt)
     Write-Host ("  [7]  Microsoft Edge       " + $eg)
     Write-Host ("  [8]  Windows Activation   " + $wa)
+    Write-Host ("  [9]  UAC Password         " + $up)
     Write-Host ""
     Write-Host "  [Q]  Quit"
     Write-Host ""
@@ -266,6 +284,10 @@ while ($running) {
             # actually done — not immediately after launch when nothing has changed yet.
             Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"irm https://get.activated.win | iex`"" -Wait
             $wa = Get-WindowsActivationState
+        }
+        '9' {
+            if ($up -eq 'Required') { Set-UACPassword $false } else { Set-UACPassword $true }
+            $changed = $true
         }
         'Q' { $running = $false }
     }
