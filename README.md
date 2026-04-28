@@ -25,8 +25,6 @@ Or run `Explorer Sidebar Cleaner.bat` if you have the repo cloned locally. A UAC
 | 8 | Windows Activation | Activate Windows via [Microsoft Activation Scripts](https://github.com/massgravel/Microsoft-Activation-Scripts) |
 | 9 | UAC Password | Require a password at UAC elevation prompts (instead of just clicking Yes) |
 
-> **Potential option:** Start Menu "All Apps" default — set `Start_ShowAllApps` (DWORD, value `1`) under `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced` to open the All Apps view by default instead of Pinned.
-
 Explorer restarts automatically when you quit if any changes were made.
 
 ## Requirements

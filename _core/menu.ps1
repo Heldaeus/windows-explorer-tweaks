@@ -12,8 +12,7 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
             Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$me`"" -Verb RunAs -ErrorAction Stop
         } else {
             # Fallback for when the script was piped in via "irm <url> | iex" and therefore
-            # has no path on disk. In that case $PSCommandPath is null and we can't use -File,
-            # so we re-fetch the script from GitHub and run it with -Command instead.
+            # has no path on disk. Re-fetch the script from GitHub and run it elevated.
             $url = 'https://raw.githubusercontent.com/Heldaeus/windows-explorer-tweaks/master/_core/menu.ps1'
             Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"irm '$url' | iex`"" -Verb RunAs -ErrorAction Stop
         }
@@ -24,178 +23,37 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
     exit
 }
 
-# ── State detectors ──────────────────────────────────────────────────────────
-# Each function reads live registry or shell state and returns a short human-readable
-# label. The menu calls these before every redraw so it always shows the current truth,
-# even if something was changed outside this tool.
+# ── Modules ───────────────────────────────────────────────────────────────────
+# Load state detectors and action functions from each feature's own folder.
+# When running from a file on disk, dot-source by path. When piped in via
+# irm | iex (no file on disk), fetch each module from GitHub and evaluate it.
 
-function Get-HomeGalleryState {
-    # Home and Gallery each have a unique GUID (Globally Unique Identifier) that Windows
-    # uses to register them as shell namespace objects. Per-user visibility is controlled
-    # by overrides in HKCU\Software\Classes\CLSID. We count how many of the two are
-    # hidden so we can report a "Partial" state if only one has been overridden.
-    $hidden = 0
-    foreach ($id in @('{f874310e-b6b7-47dc-bc84-b9e6b38f5903}', '{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}')) {
-        $k = "HKCU:\Software\Classes\CLSID\$id"
-        if ((Test-Path $k) -and (Get-ItemProperty $k -ErrorAction SilentlyContinue).'System.IsPinnedToNameSpaceTree' -eq 0) { $hidden++ }
+if ($PSCommandPath) {
+    $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
+    . "$root\Sidebar - Home & Gallery\_module.ps1"
+    . "$root\Sidebar - Quick Access\_module.ps1"
+    . "$root\Explorer Launch Folder\_module.ps1"
+    . "$root\Sidebar - Recycle Bin\_module.ps1"
+    . "$root\Start Menu\_module.ps1"
+    . "$root\Taskbar - Tablet Mode\_module.ps1"
+    . "$root\_core\modules\edge.ps1"
+    . "$root\_core\modules\activation.ps1"
+    . "$root\_core\modules\uac.ps1"
+} else {
+    $repoUrl = 'https://raw.githubusercontent.com/Heldaeus/windows-explorer-tweaks/master'
+    # URL-encode each path segment so folder names with spaces/ampersands resolve correctly.
+    function _EncodeUrl([string]$p) {
+        ($p -split '[/\\]' | ForEach-Object { [Uri]::EscapeDataString($_) }) -join '/'
     }
-    if ($hidden -eq 2) { 'Hidden' } elseif ($hidden -eq 0) { 'Visible' } else { 'Partial' }
-}
-
-function Get-RecentFoldersState {
-    # ShowFrequent = 0 means Windows will not auto-populate Quick Access with visited folders.
-    # When the value is absent (the default), frequent folders are shown automatically.
-    $val = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer' -Name ShowFrequent -ErrorAction SilentlyContinue).ShowFrequent
-    if ($val -eq 0) { 'Hidden' } else { 'Visible' }
-}
-
-function Get-DefaultFolderState {
-    # LaunchTo controls which folder Explorer opens on launch.
-    # 3 = Downloads; any other value (or absent) defaults to Home / Quick Access.
-    $val = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name LaunchTo -ErrorAction SilentlyContinue).LaunchTo
-    if ($val -eq 3) { 'Downloads' } else { 'Home' }
-}
-
-function Get-RecommendedSectionState {
-    # HideRecommendedSection lives in HKLM\Policies — the Group Policy enforcement hive.
-    # Windows components treat values here as enforced configuration rather than preferences.
-    # A value of 1 suppresses the Recommended section in the Start Menu for all users.
-    $val = (Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer' -Name HideRecommendedSection -ErrorAction SilentlyContinue).HideRecommendedSection
-    if ($val -eq 1) { 'Hidden' } else { 'Visible' }
-}
-
-function Get-TabletTaskbarState {
-    # Both values must be 1 for the feature to be fully active; we report Disabled if
-    # either is missing or 0.
-    $tpt = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer' -Name TabletPostureTaskbar -ErrorAction SilentlyContinue).TabletPostureTaskbar
-    $exp = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name ExpandableTaskbar -ErrorAction SilentlyContinue).ExpandableTaskbar
-    if ($tpt -eq 1 -and $exp -eq 1) { 'Enabled' } else { 'Disabled' }
-}
-
-function Get-RecycleBinState {
-    # We check whether "Recycle Bin" appears among the items in the Quick Access namespace
-    # using Shell.Application (a COM object) rather than reading the registry, because
-    # the registry and the live shell can briefly disagree after a verb action.
-    $qa = (New-Object -ComObject Shell.Application).Namespace("shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}")
-    if ($qa -and ($qa.Items() | Where-Object { $_.Name -eq 'Recycle Bin' })) { 'Pinned' } else { 'Unpinned' }
-}
-
-function Get-EdgeState {
-    # Edge (Chromium) installs to this path on both 32-bit and 64-bit Windows.
-    # Checking the executable is faster and more reliable than querying AppX packages,
-    # which can vary depending on how Edge was installed (Store vs. standalone installer).
-    $exe = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
-    if (Test-Path $exe) { 'Installed' } else { 'Not installed' }
-}
-
-function Get-UACPasswordState {
-    # ConsentPromptBehaviorAdmin controls what the UAC dialog asks for when an admin
-    # triggers elevation. 1 = requires the admin to type their password; 5 (default) =
-    # just a Yes/No consent dialog with no credential entry.
-    $val = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name ConsentPromptBehaviorAdmin -ErrorAction SilentlyContinue).ConsentPromptBehaviorAdmin
-    if ($val -eq 1) { 'Required' } else { 'Not required' }
-}
-
-function Get-WindowsActivationState {
-    # SoftwareLicensingProduct tracks every Microsoft license on the machine.
-    # We filter to Windows products that have a partial product key (i.e. are actually
-    # installed) and check LicenseStatus: 1 = Licensed/Activated, anything else = not.
-    $status = (Get-CimInstance SoftwareLicensingProduct -Filter "Name like 'Windows%' and PartialProductKey is not null" -ErrorAction SilentlyContinue).LicenseStatus
-    if ($status -eq 1) { 'Activated' } else { 'Not activated' }
-}
-
-# ── Actions ───────────────────────────────────────────────────────────────────
-# Each function accepts a parameter describing the desired end-state and applies the
-# appropriate registry changes. The menu loop decides what to call; these just do it.
-
-function Set-HomeGallery([bool]$hide) {
-    foreach ($id in @('{f874310e-b6b7-47dc-bc84-b9e6b38f5903}', '{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}')) {
-        $k = "HKCU:\Software\Classes\CLSID\$id"
-        if ($hide) {
-            if (-not (Test-Path $k)) { New-Item $k -Force | Out-Null }
-            Set-ItemProperty $k -Name 'System.IsPinnedToNameSpaceTree' -Value 0 -Type DWord
-        } else {
-            # Restoring visibility means removing our override so Windows falls back to its
-            # own defaults (visible). We also clean up empty keys to avoid registry clutter.
-            if (Test-Path $k) {
-                Remove-ItemProperty $k -Name 'System.IsPinnedToNameSpaceTree' -ErrorAction SilentlyContinue
-                $ki = Get-Item $k
-                if ($ki.SubKeyCount -eq 0 -and $ki.ValueCount -eq 0) { Remove-Item $k -Force }
-            }
-        }
-    }
-}
-
-function Set-RecentFolders([bool]$hide) {
-    if ($hide) {
-        Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer' -Name ShowFrequent -Value 0 -Type DWord
-    } else {
-        Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer' -Name ShowFrequent -ErrorAction SilentlyContinue
-    }
-}
-
-function Set-DefaultFolder([string]$target) {
-    if ($target -eq 'Downloads') {
-        Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name LaunchTo -Value 3 -Type DWord
-    } else {
-        Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name LaunchTo -ErrorAction SilentlyContinue
-    }
-}
-
-function Set-RecommendedSection([bool]$hide) {
-    $key = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer'
-    if ($hide) {
-        if (-not (Test-Path $key)) { New-Item $key -Force | Out-Null }
-        Set-ItemProperty $key -Name 'HideRecommendedSection' -Value 1 -Type DWord
-    } else {
-        if (Test-Path $key) {
-            Remove-ItemProperty $key -Name 'HideRecommendedSection' -ErrorAction SilentlyContinue
-        }
-    }
-}
-
-function Set-TabletTaskbar([bool]$enable) {
-    $val = if ($enable) { 1 } else { 0 }
-    Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer' -Name TabletPostureTaskbar -Value $val -Type DWord
-    Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name ExpandableTaskbar -Value $val -Type DWord
-}
-
-function Set-UACPassword([bool]$require) {
-    # The system UAC policy key always exists on Windows; we never need to create it.
-    # 1 = prompt for credentials (password required on secure desktop).
-    # 5 = prompt for consent only (Windows default — just click Yes).
-    $val = if ($require) { 1 } else { 5 }
-    Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name ConsentPromptBehaviorAdmin -Value $val -Type DWord
-}
-
-function Set-RecycleBin([bool]$pin) {
-    $shell   = New-Object -ComObject Shell.Application
-    $hkcuKey = 'HKCU:\Software\Classes\CLSID\{645FF040-5081-101B-9F08-00AA002F954E}'
-    if ($pin) {
-        # Invoke the "Pin to Quick access" verb via the shell — equivalent to right-clicking
-        # the Recycle Bin in Explorer and selecting that option.
-        $v = $shell.Namespace("shell:RecycleBinFolder").Self.Verbs() | Where-Object { $_.Name -eq 'Pin to &Quick access' } | Select-Object -First 1
-        if ($v) { $v.DoIt() }
-        # Hide the default standalone sidebar entry so the Recycle Bin only appears once,
-        # in the Quick Access section rather than at the bottom of the sidebar.
-        if (-not (Test-Path $hkcuKey)) { New-Item $hkcuKey -Force | Out-Null }
-        Set-ItemProperty $hkcuKey -Name 'System.IsPinnedToNameSpaceTree' -Value 0 -Type DWord
-    } else {
-        # The "Unpin" verb is only available when accessing the item through the Quick Access
-        # namespace — it doesn't appear when navigating to the Recycle Bin directly.
-        $rb = $shell.Namespace("shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}").Items() | Where-Object { $_.Name -eq 'Recycle Bin' } | Select-Object -First 1
-        if ($rb) {
-            $v = $rb.Verbs() | Where-Object { $_.Name -match 'Unpin' } | Select-Object -First 1
-            if ($v) { $v.DoIt() }
-        }
-        # Remove the HKCU override so the Recycle Bin returns to its default sidebar
-        # position. Leaving IsPinnedToNameSpaceTree = 0 would hide it entirely.
-        if (Test-Path $hkcuKey) {
-            Remove-ItemProperty $hkcuKey -Name 'System.IsPinnedToNameSpaceTree' -ErrorAction SilentlyContinue
-            $k = Get-Item $hkcuKey
-            if ($k.SubKeyCount -eq 0 -and $k.ValueCount -eq 0) { Remove-Item $hkcuKey -Force }
-        }
-    }
+    iex (irm "$repoUrl/$(_EncodeUrl 'Sidebar - Home & Gallery/_module.ps1')")
+    iex (irm "$repoUrl/$(_EncodeUrl 'Sidebar - Quick Access/_module.ps1')")
+    iex (irm "$repoUrl/$(_EncodeUrl 'Explorer Launch Folder/_module.ps1')")
+    iex (irm "$repoUrl/$(_EncodeUrl 'Sidebar - Recycle Bin/_module.ps1')")
+    iex (irm "$repoUrl/$(_EncodeUrl 'Start Menu/_module.ps1')")
+    iex (irm "$repoUrl/$(_EncodeUrl 'Taskbar - Tablet Mode/_module.ps1')")
+    iex (irm "$repoUrl/_core/modules/edge.ps1")
+    iex (irm "$repoUrl/_core/modules/activation.ps1")
+    iex (irm "$repoUrl/_core/modules/uac.ps1")
 }
 
 # ── Menu loop ─────────────────────────────────────────────────────────────────
@@ -205,7 +63,6 @@ $running = $true
 
 # Querying SoftwareLicensingProduct via CIM is slow (it wakes the Software Protection
 # Platform service), so we fetch it once upfront rather than on every menu redraw.
-# It will be refreshed when the user launches MAS and returns to the menu.
 $wa = Get-WindowsActivationState
 
 try {
@@ -237,6 +94,7 @@ while ($running) {
     Write-Host ("  [8]  Windows Activation   " + $wa)
     Write-Host ("  [9]  UAC Password         " + $up)
     Write-Host ""
+    Write-Host "  [R]  Restart Explorer"
     Write-Host "  [Q]  Quit"
     Write-Host ""
 
@@ -270,24 +128,26 @@ while ($running) {
             $changed = $true
         }
         '7' {
-            # Launch EdgeRemover (https://github.com/he3als/EdgeRemover) in a new window.
-            # We're already elevated, so the child process inherits admin rights without
-            # needing an additional UAC prompt. EdgeRemover runs its own interactive TUI
-            # so we open it separately rather than trying to embed it in this menu.
+            # Launch EdgeRemover in a new window. We're already elevated so the child
+            # process inherits admin rights. EdgeRemover runs its own TUI so we open
+            # it separately rather than embedding it here.
             Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"iex(irm 'https://cdn.jsdelivr.net/gh/he3als/EdgeRemover@main/get.ps1')`""
         }
         '8' {
-            # Launch Microsoft Activation Scripts (https://github.com/massgravel/Microsoft-Activation-Scripts)
-            # in a new window. MAS is TUI-only and handles its own flow, so we open it
-            # separately. Elevation is inherited from the already-elevated parent process.
-            # -Wait blocks until the MAS window closes, so we re-query only after it's
-            # actually done — not immediately after launch when nothing has changed yet.
+            # -Wait blocks until the MAS window closes so we re-query only after it's
+            # actually done, not immediately after launch when nothing has changed yet.
             Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"irm https://get.activated.win | iex`"" -Wait
             $wa = Get-WindowsActivationState
         }
         '9' {
             if ($up -eq 'Required') { Set-UACPassword $false } else { Set-UACPassword $true }
             $changed = $true
+        }
+        'R' {
+            Stop-Process -Name explorer -Force
+            Stop-Process -Name StartMenuExperienceHost -Force -ErrorAction SilentlyContinue
+            Start-Process explorer
+            $changed = $false
         }
         'Q' { $running = $false }
     }
@@ -300,9 +160,10 @@ while ($running) {
     exit 1
 }
 
-# Only restart Explorer if something actually changed. Restarting it unnecessarily
+# Only restart Explorer if something actually changed. Restarting unnecessarily
 # would close any open folder windows the user had open.
 if ($changed) {
     Stop-Process -Name explorer -Force
+    Stop-Process -Name StartMenuExperienceHost -Force -ErrorAction SilentlyContinue
     Start-Process explorer
 }
