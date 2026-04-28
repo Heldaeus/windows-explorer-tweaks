@@ -1,4 +1,4 @@
-# Explorer Sidebar Cleaner
+# Windows Explorer Tweaks
 
 A collection of PowerShell scripts for tweaking the Windows 11 Explorer UI, bundled into an interactive menu.
 
@@ -9,7 +9,7 @@ A collection of PowerShell scripts for tweaking the Windows 11 Explorer UI, bund
 irm https://raw.githubusercontent.com/Heldaeus/windows-explorer-tweaks/master/_core/menu.ps1 | iex
 ```
 
-Or run `Explorer Sidebar Cleaner.bat` if you have the repo cloned locally. A UAC prompt will appear on launch since several options require administrator privileges. Each option displays its current state and toggles on selection.
+Or run `Windows Explorer Tweaks.bat` if you have the repo cloned locally. A UAC prompt will appear on launch since several options require administrator privileges. Each option displays its current state and toggles on selection.
 
 ## Options
 

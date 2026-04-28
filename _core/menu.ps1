@@ -81,7 +81,7 @@ while ($running) {
 
     Clear-Host
     Write-Host ""
-    Write-Host "  Explorer Sidebar Cleaner"
+    Write-Host "  Windows Explorer Tweaks"
     Write-Host "  ------------------------------------------"
     Write-Host ""
     Write-Host ("  [1]  Home & Gallery       " + $hg)
